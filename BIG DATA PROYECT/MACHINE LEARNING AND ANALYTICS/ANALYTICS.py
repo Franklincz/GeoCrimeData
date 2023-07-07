@@ -92,11 +92,11 @@ raw_crimes.write.saveAsTable("Crimes")
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC SELECT SUBSTRING(fecha_publicacion, 7, 4) AS ano, COUNT(*) AS cantidad_delitos
+# MAGIC SELECT SUBSTRING(fecha_publicacion, 7, 4) AS anio, COUNT(*) AS cantidad_delitos
 # MAGIC FROM Crimes
 # MAGIC WHERE fecha_publicacion IS NOT NULL
 # MAGIC GROUP BY SUBSTRING(fecha_publicacion, 7, 4)
-# MAGIC ORDER BY ano ASC
+# MAGIC ORDER BY anio ASC
 # MAGIC
 # MAGIC
 

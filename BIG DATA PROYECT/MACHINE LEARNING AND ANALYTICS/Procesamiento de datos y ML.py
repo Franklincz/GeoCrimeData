@@ -31,7 +31,7 @@ spark = SparkSession.builder \
 
 # COMMAND ----------
 
-table_name = "DATASET_DELITOS"  # Reemplaza con el nombre de tu tabla Hive
+table_name = "DATASET_DELITOS"  # Reemplazamos con el nombre de l tabla Hive
 DATA = spark.table(table_name)
 
 
@@ -55,12 +55,22 @@ DATA.columns
 
 # COMMAND ----------
 
-classes = df.select("TIPO_DELITO").distinct().collect()
+classes = DATA.select("TIPO_DELITO").distinct().collect()
 
 # Imprimir las clases únicas
 print("CLASES DE LA VARIABLE TIPO_DELITO:")
 for row in classes:
     print(row[0])
+
+# COMMAND ----------
+
+
+count_dist_cls= DATA.groupBy("TIPO_DELITO").count()
+display(count_dist_cls)
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
@@ -79,7 +89,7 @@ from pyspark.sql.functions import col, count, sum
 
 # COMMAND ----------
 
-DATA =DATA.select(col("DESCRIPCION"), col("TIPO_DELITO"))
+DATA =DATA.select(col("TITULO"),col("DESCRIPCION"), col("TIPO_DELITO"))
 
 # COMMAND ----------
 
@@ -103,9 +113,10 @@ from pyspark.ml.feature import(Tokenizer,StopWordsRemover,CountVectorizer,IDF,St
 
 
 # dividims en palabras individuales  "DESCRIPTION"
-tokenizer= Tokenizer(inputCol='DESCRIPCION', outputCol='token_description')
-
-DATA=tokenizer.transform(DATA)
+tokenizer_desc= Tokenizer(inputCol='DESCRIPCION', outputCol='token_description')
+tokenizer_titulo= Tokenizer(inputCol='TITULO', outputCol='token_titulo')
+DATA=tokenizer_desc.transform(DATA)
+DATA=tokenizer_titulo.transform(DATA)
 
 # COMMAND ----------
 
@@ -196,16 +207,24 @@ idf= IDF(inputCol='hashed_features',outputCol='tf_idf')
 
 # COMMAND ----------
 
-word2vec = Word2Vec(vectorSize=100, minCount=5, inputCol='token_description', outputCol='word2vec_features')
-
-# COMMAND ----------
-
-model = word2vec .fit(DATA)
+from pyspark.ml.feature import Word2Vec
 
 
 # COMMAND ----------
 
-DATA=model.transform(DATA)
+word2vec_description = Word2Vec(vectorSize=50, minCount=5, inputCol='token_description', outputCol='word2vec_features')
+word2vec_titulo = Word2Vec(vectorSize=5, minCount=5, inputCol='token_titulo', outputCol='word2vec_titulo')
+
+# COMMAND ----------
+
+model1 = word2vec_description .fit(DATA)
+model2 = word2vec_titulo .fit(DATA)
+
+
+# COMMAND ----------
+
+DATA=model1.transform(DATA)
+DATA= model2.transform(DATA)
 
 # COMMAND ----------
 
@@ -245,6 +264,11 @@ row_values.array[1]
 
 # COMMAND ----------
 
+from pyspark.ml.feature import VectorAssembler
+
+
+# COMMAND ----------
+
 
 # 
 # # Paso 3: Combina las características HashingTF y Word2Vec
@@ -252,22 +276,22 @@ row_values.array[1]
 #reemplazado
     #assembler = VectorAssembler(inputCols=['tf_idf'], outputCol='features')
 # para solo word2vect
-assembler = VectorAssembler(inputCols=['word2vec_features'], outputCol='features')
+assembler = VectorAssembler(inputCols=['word2vec_features', 'word2vec_titulo'] ,outputCol='features')
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC #  APLICAMOS STRINGINDEXER A MI COLUMNA DE SALIDA
+# MAGIC ###  APLICAMOS STRINGINDEXER A MI COLUMNA DE SALIDA
 
 # COMMAND ----------
 
-from pyspark.ml.feature import StringIndexer
+from pyspark.ml.feature import StringIndexer, OneHotEncoder
 
 
 # COMMAND ----------
 
-indexer = StringIndexer(inputCol='TIPO_DELITO', outputCol='label')
 
+encoder=  OneHotEncoder(inputCol="TIPO_DELITO", outputCol='label')
 
 # COMMAND ----------
 
@@ -301,15 +325,19 @@ from pyspark.ml.feature import StandardScaler
 
 # COMMAND ----------
 
-DATA_FINAL = DATA.select(col("DESCRIPCION"),col("TIPO_DELITO"))
+DATA_FINAL1 = DATA.select(col("TITULO"),col("DESCRIPCION"),col("TIPO_DELITO"))
 
 # COMMAND ----------
 
-DATA_FINAL.show()
+DATA_FINAL1.show()
 
 # COMMAND ----------
 
-(train_data, test_data) = DATA_FINAL.randomSplit([0.8, 0.2], seed=123)
+(train_data, test_data) = DATA_FINAL1.randomSplit([0.8, 0.2], seed=123)
+
+# COMMAND ----------
+
+train_data.show()
 
 # COMMAND ----------
 
@@ -328,7 +356,6 @@ Scaler = StandardScaler(inputCol="features", outputCol="scaled_features")
 # COMMAND ----------
 
 from pyspark.ml.classification import RandomForestClassifier, LogisticRegression, GBTClassifier, DecisionTreeClassifier
-
 from pyspark.ml import Pipeline
 
 # COMMAND ----------
@@ -352,8 +379,13 @@ logistic_regression = LogisticRegression(featuresCol='features', labelCol='label
 #pipeline_lr = Pipeline(stages=[tokenizer, stop_remove, hashing_tf, idf,  assembler,indexer, logistic_regression])
 #pipeline_lr = Pipeline(stages=[tokenizer, stop_remove, hashing_tf, word2vec,  assembler,indexer, logistic_regression])
 # eliminando el stopremove
-pipeline_lr = Pipeline(stages=[tokenizer, word2vec,  assembler,Scaler, indexer, logistic_regression])
+pipeline_lr = Pipeline(stages=[tokenizer_desc,tokenizer_titulo, word2vec_description,word2vec_titulo,  assembler,Scaler, encoder,logistic_regression])
 #
+
+
+# COMMAND ----------
+
+## ENTRENAMIENTO DEL MODELO
 model_lr = pipeline_lr.fit(train_data)
 
 # COMMAND ----------
@@ -421,11 +453,79 @@ print("Precision:", precision)
 evaluator.setMetricName("weightedRecall")
 recall = evaluator.evaluate(predictions_lr)
 print("Recall:", recall)
-#aproximadamente el 63.38% de las instancias positivas en tu conjunto de datos fueron correctamente identificadas por el modelo.
+#aproximadamente el 62.02% de las instancias positivas en tu conjunto de datos fueron correctamente identificadas por el modelo.
 
 # COMMAND ----------
 
 evaluator.setMetricName("f1")
 f1_score = evaluator.evaluate(predictions_lr)
 print("F1-Score:", f1_score)
+
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Random forest
+
+# COMMAND ----------
+
+from pyspark.ml import Pipeline
+
+
+# COMMAND ----------
+
+from pyspark.ml.classification import RandomForestClassifier
+
+# COMMAND ----------
+
+rf = RandomForestClassifier(labelCol="label", featuresCol="features", numTrees=100)
+
+# COMMAND ----------
+
+pipeline_rf = Pipeline(stages=[tokenizer_titulo, tokenizer_desc,  word2vec_description,word2vec_titulo,  assembler,Scaler,encoder, rf])
+
+# COMMAND ----------
+
+model_rf = pipeline_rf.fit(train_data)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## HCEMOS EL TEST DE NUESTRA DATA
+
+# COMMAND ----------
+
+predictions_rf = model_rf.transform(test_data)
+
+# COMMAND ----------
+
+accuracy_rf = evaluator.evaluate(predictions_rf)
+
+# COMMAND ----------
+
+print('Random forest Regression Accuracy:', accuracy_rf)
+
+# COMMAND ----------
+
+from pyspark.ml.classification import RandomForestClassifier
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# COMMAND ----------
+
+## VEMOS LAS METRICAS
+# Calcular métricas de evaluación
+evaluator = MulticlassClassificationEvaluator(labelCol="label", predictionCol="prediction", metricName="accuracy")
+accuracy = evaluator.evaluate(predictions_rf )
+precision = evaluator.setMetricName("weightedPrecision").evaluate(predictions_rf )
+recall = evaluator.setMetricName("weightedRecall").evaluate(predictions_rf )
+f1_score = evaluator.setMetricName("f1").evaluate(predictions_rf )
+
+# Imprimir las métricas
+print("Accuracy:", accuracy)
+print("Precision:", precision)
+print("Recall:", recall)  # porcion de instancias +  clasificadas correctamente como +
+print("F1-Score:", f1_score)# Combina la precision y el recall en una sola metrica- media armonica
+
+# COMMAND ----------
+
 
